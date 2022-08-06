@@ -14,8 +14,6 @@ pub const CHUNK_SIZE: usize = 32;
 
 // says all blocks that have been visited for the greedy meshing algorithm in a given layer
 pub struct VisitedBlockMap {
-	visited_blocks: Box<[[bool; CHUNK_SIZE]; CHUNK_SIZE]>,
-	vertex_occlusion: Box<[[u8; CHUNK_SIZE + 1]; CHUNK_SIZE + 1]>,
 	face: BlockFace,
 	coord3: i32,
 }
@@ -25,8 +23,6 @@ impl VisitedBlockMap {
 	// face and coord3 should be set according to the current slice we are iterating over
 	pub fn new() -> Self {
 		VisitedBlockMap {
-			visited_blocks: Box::new([[false; CHUNK_SIZE]; CHUNK_SIZE]),
-			vertex_occlusion: Box::new([[0; CHUNK_SIZE + 1]; CHUNK_SIZE + 1]),
 			face: BlockFace::XPos,
 			coord3: 0,
 		}
@@ -54,41 +50,6 @@ impl VisitedBlockMap {
 			BlockFace::XPos | BlockFace::XNeg => BlockPos::new(self.coord3, block.y + x_offset, block.z + y_offset),
 			BlockFace::YPos | BlockFace::YNeg => BlockPos::new(block.x + x_offset, self.coord3, block.z + y_offset),
 			BlockFace::ZPos | BlockFace::ZNeg => BlockPos::new(block.x + x_offset, block.y + y_offset, self.coord3),
-		}
-	}
-
-	fn is_visited(&self, position: BlockPos) -> bool {
-		let (x, y) = self.get_index(position);
-		self.visited_blocks[x][y]
-	}
-
-	fn set_visited(&mut self, position: BlockPos, visited: bool) {
-		let (x, y) = self.get_index(position);
-		self.visited_blocks[x][y] = visited;
-	}
-
-	fn set_occlusion_level(&mut self, x: i32, y: i32, occlusion_level: u8) {
-		let x: usize = x.try_into().unwrap();
-		let y: usize = y.try_into().unwrap();
-		self.vertex_occlusion[x][y] = occlusion_level;
-	}
-
-	fn occlusion_level_matches(&self, block1: BlockPos, block2: BlockPos) -> bool {
-		let (x1, y1) = self.get_index(block1);
-		let (x2, y2) = self.get_index(block2);
-		self.vertex_occlusion[x1][y1] == self.vertex_occlusion[x2][y2]
-			&& self.vertex_occlusion[x1 + 1][y1] == self.vertex_occlusion[x2 + 1][y2]
-			&& self.vertex_occlusion[x1][y1 + 1] == self.vertex_occlusion[x2][y2 + 1]
-			&& self.vertex_occlusion[x1 + 1][y1 + 1] == self.vertex_occlusion[x2 + 1][y2 + 1]
-	}
-
-	fn get_occlusion_data(&self, block: BlockPos) -> OcclusionCorners {
-		let (x, y) = self.get_index(block);
-		OcclusionCorners {
-			tl: self.vertex_occlusion[x][y + 1],
-			tr: self.vertex_occlusion[x + 1][y + 1],
-			bl: self.vertex_occlusion[x][y],
-			br: self.vertex_occlusion[x + 1][y],
 		}
 	}
 
@@ -252,22 +213,6 @@ impl Chunk {
 
 		let face_offset = face.block_pos_offset();
 
-		// discard all block faces that are not visible and all faces on an air block
-		for x in 0..CHUNK_SIZE as i32 {
-			for y in 0..CHUNK_SIZE as i32 {
-				let block_pos = visit_map.get_block_pos(x, y);
-
-				if self.get_block(block_pos).is_air() {
-					visit_map.set_visited(block_pos, true);
-				} else if let Some(is_translucent) = self.with_block(block_pos + face_offset, |block| block.is_translucent()) {
-					visit_map.set_visited(block_pos, !is_translucent);
-				} else {
-					// there is no adjacent chunk, don't do this mesh
-					visit_map.set_visited(block_pos, true);
-				}
-			}
-		}
-
 		let is_occluded_by = |block_pos| {
 			if let Some(is_translucent) = self.with_block(block_pos + face_offset, |block| block.is_translucent()) {
 				if is_translucent {
@@ -280,96 +225,95 @@ impl Chunk {
 			}
 		};
 
-		// get occlusion levels of all verticies
-		for x in 0..(CHUNK_SIZE as i32 + 1) {
-			for y in 0..(CHUNK_SIZE as i32 + 1) {
-				let tl_occludes = is_occluded_by(visit_map.get_block_pos(x - 1, y - 1));
-				let tr_occludes = is_occluded_by(visit_map.get_block_pos(x, y - 1));
-				let bl_occludes = is_occluded_by(visit_map.get_block_pos(x - 1, y));
-				let br_occludes = is_occluded_by(visit_map.get_block_pos(x, y));
+		// FIXME: inconsistance arguments
+		let vertex_occlusion_level = |x: i32, y: i32| {
+			let tl_occludes = is_occluded_by(visit_map.get_block_pos(x - 1, y - 1));
+			let tr_occludes = is_occluded_by(visit_map.get_block_pos(x, y - 1));
+			let bl_occludes = is_occluded_by(visit_map.get_block_pos(x - 1, y));
+			let br_occludes = is_occluded_by(visit_map.get_block_pos(x, y));
 
-				let mut occlusion_level = tl_occludes + tr_occludes + bl_occludes + br_occludes;
-				// if the vertex is in a corner formed by only 2 blocks, the occlusion level needs to be 3
-				if (tl_occludes == 1 && br_occludes == 1) || (tr_occludes == 1 && bl_occludes == 1) {
-					occlusion_level = 3;
-				}
-
-				visit_map.set_occlusion_level(x, y, occlusion_level);
+			let mut occlusion_level = tl_occludes + tr_occludes + bl_occludes + br_occludes;
+			// if the vertex is in a corner formed by only 2 blocks, the occlusion level needs to be 3
+			if (tl_occludes == 1 && br_occludes == 1) || (tr_occludes == 1 && bl_occludes == 1) {
+				occlusion_level = 3;
 			}
-		}
+
+			return occlusion_level;
+		};
+
+		let face_occlusion_data = |block_pos: BlockPos| {
+			let (x, y) = visit_map.get_index(block_pos);
+			let x = x as i32;
+			let y = y as i32;
+			OcclusionCorners {
+				tl: vertex_occlusion_level(x, y + 1),
+				tr: vertex_occlusion_level(x + 1, y + 1),
+				bl: vertex_occlusion_level(x, y),
+				br: vertex_occlusion_level(x + 1, y),
+			}
+		};
 
 		for x in 0..CHUNK_SIZE as i32 {
 			let mut y = 0;
 			while y < CHUNK_SIZE as i32 {
 				let block_pos = visit_map.get_block_pos(x, y);
-				if visit_map.is_visited(block_pos) {
+
+				let block = self.get_block(block_pos);
+				if block.is_air() {
+					y += 1;
+					continue;
+				} else if let Some(is_translucent) = self.with_block(block_pos + face_offset, |block| block.is_translucent()) {
+					if !is_translucent {
+						y += 1;
+						continue;
+					}
+				} else {
 					y += 1;
 					continue;
 				}
 
-				let block = self.get_block(block_pos);
 				let block_type = block.block_type();
 
 				// width and height of the greedy mesh region
 				let mut width = 1;
-				let mut height = 1;
 
-				loop {
-					let current_block_pos = visit_map.get_block_pos_offset(block_pos, 0, width);
-					// get_block_pos_offset could put current block out of bounds
-					if !current_block_pos.is_chunk_local() {
-						break;
-					}
-	
-					if !visit_map.is_visited(current_block_pos)
-						&& self.get_block(current_block_pos).block_type() == block_type
-						&& visit_map.occlusion_level_matches(block_pos, current_block_pos) {
-						visit_map.set_visited(current_block_pos, true);
-						width += 1;
-					} else {
-						// don't visit a block if it is a different type, we still want to visit later
-						break;
-					}
-				}
-	
-				/*loop {
-					// can we expand the height of the mesh
-					let mut expandable = true;
-	
-					for w in 0..width {
-						let current_block_pos = visit_map.get_block_pos_offset(block_pos, w, height);
+				let occlusion_corners = face_occlusion_data(block_pos);
+
+				// to be growable, the ambient occlusion level of the vertext on each respective x level has to be the same
+				let growable = occlusion_corners.tl == occlusion_corners.bl && occlusion_corners.tr == occlusion_corners.br;
+
+				if growable {
+					loop {
+						let current_block_pos = visit_map.get_block_pos_offset(block_pos, 0, width);
 						// get_block_pos_offset could put current block out of bounds
 						if !current_block_pos.is_chunk_local() {
-							// if we can't test all of the blocks, we can't expand the region
-							expandable = false;
 							break;
 						}
 
-						if visit_map.is_visited(current_block_pos)
-							|| self.get_block(current_block_pos).block_type() != block_type
-							|| !visit_map.occlusion_level_matches(block_pos, current_block_pos) {
-							expandable = false;
+						if let Some(is_translucent) = self.with_block(block_pos + face_offset, |block| block.is_translucent()) {
+							if is_translucent && self.get_block(current_block_pos).block_type() == block_type {
+								// TODO: don't need to calculate all occlusion corners, only 2
+								let occlusion_corners_new = face_occlusion_data(current_block_pos);
+								if occlusion_corners_new.tl == occlusion_corners.tl && occlusion_corners_new.tr == occlusion_corners.tr {
+									width += 1;
+								} else {
+									break;
+								}
+							} else {
+								break;
+							}
+						} else {
 							break;
 						}
 					}
-	
-					if !expandable {
-						break;
-					}
-	
-					for w in 0..width {
-						visit_map.set_visited(visit_map.get_block_pos_offset(block_pos, w, height), true);
-					}
-	
-					height += 1;
-				}*/
+				}
 
 				let block_face_mesh = BlockFaceMesh::from_cube_corners(
 					face,
 					block.texture_index().unwrap(),
 					block_pos + self.block_position,
-					visit_map.get_block_pos_offset(block_pos, width - 1, height - 1) + self.block_position,
-					visit_map.get_occlusion_data(block_pos),
+					visit_map.get_block_pos_offset(block_pos, 0, width - 1) + self.block_position,
+					occlusion_corners,
 				);
 	
 				chunk_mesh[Into::<usize>::into(face)][index].push(block_face_mesh);
@@ -391,7 +335,7 @@ impl Chunk {
 	}
 
 	// returns None if the mesh is currently locked, which means it is being generated,
-	// so we wouldn't have to display it anywats
+	// so we wouldn't have to display it anyways
 	pub fn get_chunk_mesh(&self) -> Option<Vec<BlockFaceMesh>> {
 		Some(self.chunk_mesh.try_read()?.iter()
 			.flatten()

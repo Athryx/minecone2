@@ -92,6 +92,10 @@ impl ChunkPos {
         ChunkPos(IVec3::new(x, y, z))
     }
 
+    pub fn splat(n: i32) -> Self {
+        ChunkPos(IVec3::splat(n))
+    }
+
     pub fn as_block_pos(self) -> BlockPos {
         self.into()
     }
@@ -141,6 +145,10 @@ pub struct BlockPos(pub IVec3);
 impl BlockPos {
     pub fn new(x: i32, y: i32, z: i32) -> Self {
         BlockPos(IVec3::new(x, y, z))
+    }
+
+    pub fn splat(n: i32) -> Self {
+        BlockPos(IVec3::splat(n))
     }
 
     pub fn is_chunk_local(&self) -> bool {
@@ -221,6 +229,10 @@ pub struct Position(pub Vec3);
 impl Position {
     pub fn new(x: f32, y: f32, z: f32) -> Self {
         Position(Vec3::new(x, y, z))
+    }
+
+    pub fn splat(n: f32) -> Self {
+        Position(Vec3::splat(n))
     }
 
     pub fn as_block_pos(self) -> BlockPos {

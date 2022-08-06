@@ -9,6 +9,7 @@ use glam::{UVec3, IVec3};
 use anyhow::Result;
 use parking_lot::RwLock;
 use glam::Vec3;
+use rustc_hash::FxHashSet;
 
 use super::{
 	chunk::{Chunk, LoadedChunk, ChunkData, VisitedBlockMap},
@@ -20,6 +21,8 @@ use super::{
 };
 use crate::prelude::*;
 use crate::vec3_map;
+
+pub const RENDER_ZONE_SIZE: i32 = 8;
 
 #[derive(Debug)]
 pub struct ChunkMeshFaceData {
@@ -161,9 +164,23 @@ impl World {
 		});
 	}
 
+	fn chunk_render_zone_updated(min_chunk: ChunkPos, max_chunk: ChunkPos, updated_render_zones: &mut FxHashSet<ChunkPos>) {
+		let min_render_zone = Self::get_render_zone_of_chunk(min_chunk);
+		let max_render_zone = Self::get_render_zone_of_chunk(max_chunk - ChunkPos::splat(1));
+
+		for x in (min_render_zone.x..=max_render_zone.x).step_by(RENDER_ZONE_SIZE as usize) {
+			for y in (min_render_zone.y..=max_render_zone.y).step_by(RENDER_ZONE_SIZE as usize) {
+				for z in (min_render_zone.z..=max_render_zone.z).step_by(RENDER_ZONE_SIZE as usize) {
+					updated_render_zones.insert(ChunkPos::new(x, y, z));
+				}
+			}
+		}
+	}
+
 	// performs mesh updates on the passed in block as well as all adjacent blocks
+	// NOTE: this is not multithreaded, it blocks the current thread until done
 	// FIXME: this doesn't update everything it needs to with ambient occlusion on chunk boundaries
-	pub fn mesh_update_adjacent(&self, block: BlockPos) {
+	pub fn mesh_update_adjacent(&self, block: BlockPos, updated_render_zones: &mut FxHashSet<ChunkPos>) {
 		let block_chunk_local = block.as_chunk_local();
 		let mut visit_map = VisitedBlockMap::new();
 
@@ -174,12 +191,14 @@ impl World {
 			chunk.chunk.mesh_update_inner(BlockFace::YNeg, block_chunk_local.y as usize, &mut visit_map);
 			chunk.chunk.mesh_update_inner(BlockFace::ZPos, block_chunk_local.z as usize, &mut visit_map);
 			chunk.chunk.mesh_update_inner(BlockFace::ZNeg, block_chunk_local.z as usize, &mut visit_map);
+			updated_render_zones.insert(Self::get_render_zone_of_chunk(block.as_chunk_pos()));
 		}
 
 		for face in BlockFace::iter() {
 			// subtract to get opposite as normal offest
 			let offset_block = block - face.block_pos_offset();
 			if let Some(chunk) = self.chunks.get(&offset_block.as_chunk_pos()) {
+				updated_render_zones.insert(Self::get_render_zone_of_chunk(offset_block.as_chunk_pos()));
 				chunk.chunk.mesh_update_inner(
 					face,
 					offset_block.as_chunk_local().get_face_component(face) as usize,
@@ -230,6 +249,16 @@ impl World {
 		} else {
 			false
 		}
+	}
+
+	pub fn get_render_zone_of_chunk(chunk: ChunkPos) -> ChunkPos {
+		ChunkPos(RENDER_ZONE_SIZE * chunk.map(|elem| {
+			if elem >= 0 {
+				elem / RENDER_ZONE_SIZE
+			} else {
+				(elem - RENDER_ZONE_SIZE + 1) / RENDER_ZONE_SIZE
+			}
+		}))
 	}
 
 	// casts a ray starting at ray_start up to a length of max_length
@@ -299,12 +328,28 @@ impl World {
 
 	// called by the client to force the world to recieve task completion notices
 	// returns true if the mesh should be updated by the client
-	pub fn poll_completed_tasks(&self) -> bool {
-		let mut update_mesh = false;
+	pub fn poll_completed_tasks(&self, updated_render_zones: &mut FxHashSet<ChunkPos>) {
+		let chunk_zone_updated = |min_chunk: ChunkPos, max_chunk: ChunkPos, render_zone_set: &mut FxHashSet<ChunkPos>| {
+			let min_render_zone = Self::get_render_zone_of_chunk(min_chunk);
+			let max_render_zone = Self::get_render_zone_of_chunk(max_chunk - ChunkPos::splat(1));
+
+			for x in (min_render_zone.x..=max_render_zone.x).step_by(RENDER_ZONE_SIZE as usize) {
+				for y in (min_render_zone.y..=max_render_zone.y).step_by(RENDER_ZONE_SIZE as usize) {
+					for z in (min_render_zone.z..=max_render_zone.z).step_by(RENDER_ZONE_SIZE as usize) {
+						render_zone_set.insert(ChunkPos::new(x, y, z));
+					}
+				}
+			}
+		};
+
 		while let Some(task) = pull_completed_task() {
 			match task {
-				Task::ChunkMesh(_) => update_mesh = true,
-				Task::ChunkMeshFace { .. } => update_mesh = true,
+				Task::ChunkMesh(chunk) => {
+					updated_render_zones.insert(Self::get_render_zone_of_chunk(chunk));
+				},
+				Task::ChunkMeshFace { min_chunk, max_chunk, .. } => {
+					chunk_zone_updated(min_chunk, max_chunk, updated_render_zones);
+				},
 				Task::GenerateChunk(chunk) => {
 					let mut load_jobs = self.chunk_load_jobs.write();
 
@@ -328,7 +373,8 @@ impl World {
 				},
 				Task::UnloadChunks { min_chunk, max_chunk } => {
 					// recreate mesh because chunks have been removed, but we don't actually have to generate their meshes
-					update_mesh = true;
+
+					chunk_zone_updated(min_chunk, max_chunk, updated_render_zones);
 
 					let mut unload_jobs = self.chunk_unload_jobs.write();
 
@@ -345,7 +391,6 @@ impl World {
 				}
 			}
 		}
-		update_mesh
 	}
 }
 
@@ -394,7 +439,7 @@ impl World {
 				self.unload_chunks(neg_min_chunk, neg_max_chunk, None);
 
 				let load_face_job = ChunkMeshFaceData {
-					face: BlockFace::from_axis(Axis::X, true),
+					face: BlockFace::from_axis(axis, true),
 					min_chunk: pos_min_chunk - axis_vec,
 					max_chunk: pos_max_chunk - axis_vec,
 				};
@@ -407,7 +452,7 @@ impl World {
 				self.unload_chunks(pos_min_chunk, pos_max_chunk, None);
 
 				let load_face_job = ChunkMeshFaceData {
-					face: BlockFace::from_axis(Axis::X, false),
+					face: BlockFace::from_axis(axis, false),
 					min_chunk: neg_min_chunk + axis_vec,
 					max_chunk: neg_max_chunk + axis_vec,
 				};
@@ -433,6 +478,28 @@ impl World {
 			.filter_map(|item| item.value().chunk.get_chunk_mesh())
 			.flatten()
 			.collect::<Vec<_>>()
+	}
+
+	pub fn render_zone_mesh(&self, render_zone: ChunkPos) -> Vec<BlockFaceMesh> {
+		let render_zone_end = render_zone + ChunkPos::splat(RENDER_ZONE_SIZE);
+
+		let mut out = Vec::new();
+
+		for x in render_zone.x..render_zone_end.x {
+			for y in render_zone.y..render_zone_end.y {
+				for z in render_zone.z..render_zone_end.z {
+					let chunk_pos = ChunkPos::new(x, y, z);
+
+					if let Some(chunk) = self.chunks.get(&chunk_pos) {
+						if let Some(mesh) = chunk.chunk.get_chunk_mesh() {
+							out.extend(mesh);
+						}
+					}
+				}
+			}
+		}
+
+		out
 	}
 }
 

@@ -1,11 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
+use std::cell::RefCell;
 
 use winit::{
 	window::Window,
 	event::*,
 	dpi::PhysicalSize
 };
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::prelude::*;
 use crate::render::Renderer;
@@ -19,23 +21,18 @@ mod camera_controller;
 
 pub struct Client {
 	world: Arc<World>,
-	world_mesh: Mesh,
+	world_mesh: RefCell<FxHashMap<ChunkPos, Mesh>>,
 	block_textures: Material,
 	player_id: PlayerId,
 	camera_controller: CameraController,
 	renderer: Renderer,
 	// destroy block on the next physics frame
 	destroy_block: bool,
-	// the number of physics updates that will happen before we update again
-	// reset evrytime world tells us to update the mesh
-	// the reason we wait a bit is because when loading new chunks world will tell us to update many times
-	// in rapid succession, and waiting a bit will improve performance
-	mesh_update_countdown: Option<u64>,
+	// this is a set of all the render zones that need their frame updated
+	render_zone_update_list: FxHashSet<ChunkPos>,
 }
 
 impl Client {
-	const MESH_UPDATE_FRAME_DELAY: u64 = 5;
-
 	pub fn new(window: &Window, world: Arc<World>) -> Self {
 		let renderer = pollster::block_on(Renderer::new(window));
 
@@ -44,55 +41,43 @@ impl Client {
 
 		let player_id = world.connect();
 
-		let mut vertexes = Vec::new();
-		let mut indexes = Vec::new();
-
-		let mut current_index = 0;
-		for block_face in world.world_mesh() {
-			vertexes.extend(block_face.0);
-			indexes.extend(BlockFaceMesh::indicies().iter().map(|elem| elem + current_index));
-			current_index += 4;
-		}
-
-		let mesh = Mesh::new(
-			"world mesh",
-			&vertexes,
-			&indexes,
-			0,
-			renderer.context()
-		);
-
 		Self {
 			world,
-			world_mesh: mesh,
+			world_mesh: RefCell::new(FxHashMap::default()),
 			block_textures,
 			player_id,
 			camera_controller: CameraController::new(7.0, 20.0, 2.0),
 			renderer,
 			destroy_block: false,
-			mesh_update_countdown: None,
+			render_zone_update_list: FxHashSet::default(),
 		}
 	}
 
-	pub fn generate_mesh(&mut self) {
+	fn generate_mesh(&self, render_zone: ChunkPos) {
 		let mut vertexes = Vec::new();
 		let mut indexes = Vec::new();
 
 		let mut current_index = 0;
-		for block_face in self.world.world_mesh() {
+		for block_face in self.world.render_zone_mesh(render_zone) {
 			vertexes.extend(block_face.0);
 			indexes.extend(BlockFaceMesh::indicies().iter().map(|elem| elem + current_index));
 			current_index += 4;
 		}
 
 		// TODO: write to the underlying buffer
-		self.world_mesh = Mesh::new(
+		self.world_mesh.borrow_mut().insert(render_zone, Mesh::new(
 			"world mesh",
 			&vertexes,
 			&indexes,
 			0,
 			self.renderer.context()
-		);
+		));
+	}
+
+	fn render(&mut self) {
+		let world_mesh = self.world_mesh.borrow();
+		let models = world_mesh.values().map(|mesh| (mesh, &self.block_textures)).collect::<Vec<_>>();
+		self.renderer.render(&models);
 	}
 
 	pub fn input(&mut self, event: &WindowEvent) {
@@ -113,7 +98,7 @@ impl Client {
 		if let Some(new_window_size) = new_window_size {
 			self.renderer.resize(new_window_size);
 		}
-		self.renderer.render(&[(&self.world_mesh, &self.block_textures)]);
+		self.render();
 	}
 
 	pub fn physics_update(&mut self, delta: Duration) {
@@ -121,38 +106,23 @@ impl Client {
 		self.camera_controller.update_camera(camera, delta);
 		let camera_position = camera.get_position();
 
-		let mut generate_mesh = false;
-
 		if self.destroy_block {
 			if let Some(block) = self.world.block_raycast(camera_position, camera.forward(), 15.0) {
 				self.world.set_block(block, Air::new().into());
-				self.world.mesh_update_adjacent(block);
-				generate_mesh = true;
+				self.world.mesh_update_adjacent(block, &mut self.render_zone_update_list);
 			}
 
 			self.destroy_block = false;
 		}
 
-		if let Some(result) = self.world.set_player_position(self.player_id, camera_position) {
-			if result {
-				generate_mesh = true;
-			}
-		}
+		self.world.set_player_position(self.player_id, camera_position);
 
-		if self.world.poll_completed_tasks() {
-			generate_mesh = true;
+		self.world.poll_completed_tasks(&mut self.render_zone_update_list);
+		for render_zone in self.render_zone_update_list.iter() {
+			self.generate_mesh(*render_zone);
 		}
+		self.render_zone_update_list.clear();
 
-		if generate_mesh {
-			self.mesh_update_countdown = Some(Self::MESH_UPDATE_FRAME_DELAY);
-		} else if let Some(ref mut countdown) = self.mesh_update_countdown {
-			*countdown -= 1;
-			if *countdown == 0 {
-				self.mesh_update_countdown = None;
-				self.generate_mesh();
-			}
-		}
-
-		self.renderer.render(&[(&self.world_mesh, &self.block_textures)]);
+		self.render();
 	}
 }

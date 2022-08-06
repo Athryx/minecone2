@@ -13,6 +13,7 @@ use world::World;
 use client::Client;
 
 mod client;
+mod ui;
 mod player;
 mod parallel;
 mod world;
@@ -36,16 +37,18 @@ pub struct Game {
 }
 
 impl Game {
-	pub fn new(framerate: u64, window: &Window) -> Self {
+	pub fn new(framerate: u64, window: Window) -> Self {
 		let frame_time = Duration::from_micros(1_000_000 / framerate);
 
 		let world = World::new_test().expect("could not load world");
 		parallel::init(world.clone(), num_cpus::get() - 1);
 
+		let window_id = window.id();
+
 		let client = Client::new(window, world.clone());
 
 		Self {
-			window_id: window.id(),
+			window_id,
 			frame_time,
 			last_update_time: Instant::now() - frame_time,
 			world,
@@ -74,6 +77,8 @@ impl Game {
 	}
 
 	pub fn event_update(&mut self, event: Event<()>) -> ControlFlow {
+		self.client.handle_event(&event);
+
 		match event {
 			Event::RedrawRequested(window_id) if window_id == self.window_id => {
 				self.frame_update(None);

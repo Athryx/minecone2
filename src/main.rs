@@ -26,7 +26,7 @@ fn main() {
 		.build(&event_loop)
 		.unwrap();
 
-    let mut game = game::Game::new(60, &window);
+    let mut game = game::Game::new(60, window);
 
     event_loop.run(move |event, _, control_flow| {
 		*control_flow = game.event_update(event);

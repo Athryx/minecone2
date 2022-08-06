@@ -17,6 +17,7 @@ use super::player::PlayerId;
 use super::world::World;
 use super::block::{generate_texture_array, BlockFaceMesh, Air};
 use super::render_zone::UpdatedRenderZones;
+use super::ui::MineConeUi;
 
 mod camera_controller;
 
@@ -26,7 +27,9 @@ pub struct Client {
 	block_textures: Material,
 	player_id: PlayerId,
 	camera_controller: CameraController,
+	ui: MineConeUi,
 	renderer: Renderer,
+	window: Window,
 	// destroy block on the next physics frame
 	destroy_block: bool,
 	// this is a set of all the render zones that need their frame updated
@@ -34,8 +37,8 @@ pub struct Client {
 }
 
 impl Client {
-	pub fn new(window: &Window, world: Arc<World>) -> Self {
-		let renderer = pollster::block_on(Renderer::new(window));
+	pub fn new(window: Window, world: Arc<World>) -> Self {
+		let renderer = pollster::block_on(Renderer::new(&window));
 
 		let texture_array = generate_texture_array().expect("could not load texture map");
 		let block_textures = Material::array_from_images(&texture_array, String::from("texture map"), renderer.context());
@@ -48,7 +51,9 @@ impl Client {
 			block_textures,
 			player_id,
 			camera_controller: CameraController::new(7.0, 20.0, 2.0),
+			ui: MineConeUi::new(&window, &renderer),
 			renderer,
+			window,
 			destroy_block: false,
 			updated_render_zones: UpdatedRenderZones::new(),
 		}
@@ -78,11 +83,24 @@ impl Client {
 	fn render(&mut self) {
 		let world_mesh = self.world_mesh.borrow();
 		let models = world_mesh.values().map(|mesh| (mesh, &self.block_textures)).collect::<Vec<_>>();
+
+		self.renderer.start_render_pass();
+
 		self.renderer.render(&models);
+		self.ui.frame_update(&self.window, &self.renderer);
+
+		self.renderer.finish_render_pass();
+	}
+
+	// TODO: merge this with input
+	pub fn handle_event(&mut self, event: &Event<()>) {
+		self.ui.handle_event(event);
 	}
 
 	pub fn input(&mut self, event: &WindowEvent) {
+		self.ui.input(event);
 		self.camera_controller.process_event(event);
+
 		if let WindowEvent::KeyboardInput {
 			input: KeyboardInput {
 				state: ElementState::Pressed,

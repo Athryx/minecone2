@@ -435,13 +435,6 @@ impl World {
 		Some(out)
 	}
 
-	pub fn world_mesh(&self) -> Vec<BlockFaceMesh> {
-		self.chunks.iter()
-			.filter_map(|item| item.value().chunk.get_chunk_mesh())
-			.flatten()
-			.collect::<Vec<_>>()
-	}
-
 	pub fn render_zone_mesh(&self, render_zone: ChunkPos) -> Vec<BlockFaceMesh> {
 		let render_zone_end = render_zone + ChunkPos::splat(RENDER_ZONE_SIZE);
 

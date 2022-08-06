@@ -1,5 +1,6 @@
 use std::num::NonZeroU32;
 
+use egui_wgpu_backend::ScreenDescriptor;
 //use nalgebra::{Point3, Vector3, Scale3, UnitQuaternion, Unit};
 use glam::{Vec3, Mat4};
 use winit::window::Window;
@@ -28,6 +29,8 @@ pub struct Renderer {
 	camera_modified: bool,
 	camera_buffer: wgpu::Buffer,
 	camera_bind_group: wgpu::BindGroup,
+	surface_texture: Option<wgpu::SurfaceTexture>,
+	surface_texture_view: Option<wgpu::TextureView>,
 	pub size: winit::dpi::PhysicalSize<u32>,
 }
 
@@ -219,6 +222,8 @@ impl Renderer {
 			camera_modified: false,
 			camera_buffer,
 			camera_bind_group,
+			surface_texture: None,
+			surface_texture_view: None,
 			size,
 		}
 	}
@@ -229,6 +234,21 @@ impl Renderer {
 			queue: &self.queue,
 			texture_bind_layout: &self.texture_bind_layout,
 		}
+	}
+
+	// used for egui
+	pub fn device(&self) -> &wgpu::Device {
+		&self.device
+	}
+
+	// used for egui
+	pub fn queue(&self) -> &wgpu::Queue {
+		&self.queue
+	}
+
+	// used for egui
+	pub fn surface_format(&self) -> wgpu::TextureFormat {
+		self.config.format
 	}
 
 	pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -246,13 +266,8 @@ impl Renderer {
 		&mut self.camera
 	}
 
-	pub fn render(&mut self, models: &[(&Mesh, &Material)]) {
-		if self.camera_modified {
-			self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera.get_camera_uniform()]));
-			self.camera_modified = false;
-		}
-
-		let output = loop {
+	pub fn start_render_pass(&mut self) {
+		let surface_texture = loop {
 			match self.surface.get_current_texture() {
 				Ok(texture) => break texture,
 				// reconfigure surface if lost
@@ -263,7 +278,32 @@ impl Renderer {
 				Err(e) => warn!("{:?}", e),
 			}
 		};
-		let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+		let surface_texture_view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+		self.surface_texture = Some(surface_texture);
+		self.surface_texture_view = Some(surface_texture_view);
+	}
+
+	pub fn finish_render_pass(&mut self) {
+		let surface_texture = std::mem::replace(&mut self.surface_texture, None);
+		self.surface_texture_view = None;
+
+		surface_texture
+			.expect("render pass cannot be finisehd because it was not started")
+			.present();
+	}
+
+	pub fn output_surface(&self) -> Option<(&wgpu::SurfaceTexture, &wgpu::TextureView)> {
+		Some((self.surface_texture.as_ref()?, self.surface_texture_view.as_ref()?))
+	}
+
+	pub fn render(&mut self, models: &[(&Mesh, &Material)]) {
+		if self.camera_modified {
+			self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera.get_camera_uniform()]));
+			self.camera_modified = false;
+		}
+
+		let (output, view) = self.output_surface().expect("render pass has not been started");
 
 		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 			label: Some("render encoder"),
@@ -303,6 +343,5 @@ impl Renderer {
 		}
 
 		self.queue.submit(std::iter::once(encoder.finish()));
-		output.present();
 	}
 }

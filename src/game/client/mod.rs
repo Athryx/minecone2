@@ -16,6 +16,7 @@ use camera_controller::CameraController;
 use super::player::PlayerId;
 use super::world::World;
 use super::block::{generate_texture_array, BlockFaceMesh, Air};
+use super::render_zone::UpdatedRenderZones;
 
 mod camera_controller;
 
@@ -29,7 +30,7 @@ pub struct Client {
 	// destroy block on the next physics frame
 	destroy_block: bool,
 	// this is a set of all the render zones that need their frame updated
-	render_zone_update_list: FxHashSet<ChunkPos>,
+	updated_render_zones: UpdatedRenderZones,
 }
 
 impl Client {
@@ -49,7 +50,7 @@ impl Client {
 			camera_controller: CameraController::new(7.0, 20.0, 2.0),
 			renderer,
 			destroy_block: false,
-			render_zone_update_list: FxHashSet::default(),
+			updated_render_zones: UpdatedRenderZones::new(),
 		}
 	}
 
@@ -109,7 +110,7 @@ impl Client {
 		if self.destroy_block {
 			if let Some(block) = self.world.block_raycast(camera_position, camera.forward(), 15.0) {
 				self.world.set_block(block, Air::new().into());
-				self.world.mesh_update_adjacent(block, &mut self.render_zone_update_list);
+				self.world.mesh_update_adjacent(block, &mut self.updated_render_zones);
 			}
 
 			self.destroy_block = false;
@@ -117,11 +118,11 @@ impl Client {
 
 		self.world.set_player_position(self.player_id, camera_position);
 
-		self.world.poll_completed_tasks(&mut self.render_zone_update_list);
-		for render_zone in self.render_zone_update_list.iter() {
+		self.world.poll_completed_tasks(&mut self.updated_render_zones);
+		for render_zone in self.updated_render_zones.iter() {
 			self.generate_mesh(*render_zone);
 		}
-		self.render_zone_update_list.clear();
+		self.updated_render_zones.clear();
 
 		self.render();
 	}

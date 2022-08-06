@@ -19,6 +19,7 @@ mod world;
 mod worldgen;
 mod chunk;
 pub use chunk::CHUNK_SIZE;
+mod render_zone;
 mod entity;
 mod block;
 pub use block::{BlockFace, BlockVertex, num_textures};

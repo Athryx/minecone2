@@ -13,8 +13,9 @@ use crate::game::{BlockVertex, num_textures};
 
 pub mod camera;
 pub mod model;
+mod bounding_box;
+pub use bounding_box::Aabb;
 pub mod texture;
-
 
 #[derive(Debug)]
 pub struct Renderer {
@@ -282,6 +283,11 @@ impl Renderer {
 
 		self.surface_texture = Some(surface_texture);
 		self.surface_texture_view = Some(surface_texture_view);
+
+		if self.camera_modified {
+			self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera.get_camera_uniform()]));
+			self.camera_modified = false;
+		}
 	}
 
 	pub fn finish_render_pass(&mut self) {
@@ -293,17 +299,12 @@ impl Renderer {
 			.present();
 	}
 
-	pub fn output_surface(&self) -> Option<(&wgpu::SurfaceTexture, &wgpu::TextureView)> {
-		Some((self.surface_texture.as_ref()?, self.surface_texture_view.as_ref()?))
+	pub fn output_texture_view(&self) -> Option<&wgpu::TextureView> {
+		self.surface_texture_view.as_ref()
 	}
 
 	pub fn render(&mut self, models: &[(&Mesh, &Material)]) {
-		if self.camera_modified {
-			self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera.get_camera_uniform()]));
-			self.camera_modified = false;
-		}
-
-		let (output, view) = self.output_surface().expect("render pass has not been started");
+		let view = self.output_texture_view().expect("render pass has not been started");
 
 		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 			label: Some("render encoder"),
@@ -338,6 +339,11 @@ impl Renderer {
 			render_pass.set_pipeline(&self.render_pipeline);
 
 			for (mesh, material) in models.iter() {
+				if let Some(aabb) = mesh.bounding_box {
+					if !self.camera.bounding_box_visible(aabb) {
+						continue;
+					}
+				}
 				render_pass.draw_mesh(mesh, material, &self.camera_bind_group);
 			}
 		}

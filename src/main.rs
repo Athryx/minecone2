@@ -13,6 +13,7 @@ use winit::{
 
 mod game;
 mod render;
+mod math;
 mod assets;
 mod prelude;
 

@@ -2,9 +2,9 @@ use std::collections::hash_set::Iter;
 
 use rustc_hash::FxHashSet;
 
-use crate::prelude::*;
+use crate::{prelude::*, render::Aabb};
 
-pub const RENDER_ZONE_SIZE: i32 = 8;
+pub const RENDER_ZONE_SIZE: i32 = 4;
 
 pub struct UpdatedRenderZones(FxHashSet<ChunkPos>);
 
@@ -51,4 +51,12 @@ impl UpdatedRenderZones {
     pub fn iter(&self) -> Iter<ChunkPos> {
         self.0.iter()
     }
+}
+
+/// returns the axis aligned bounding box for the render zone
+pub fn render_zone_aabb(render_zone: ChunkPos) -> Aabb {
+    Aabb::new(
+        render_zone.as_position().0,
+        ChunkPos::splat(RENDER_ZONE_SIZE).as_position().0,
+    )
 }

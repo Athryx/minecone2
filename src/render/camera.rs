@@ -1,7 +1,10 @@
 //use nalgebra::{Vector3, Matrix4, Point3};
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4, Quat};
 
 use crate::prelude::*;
+use crate::math::Plane;
+
+use super::Aabb;
 
 const TO_GPU_MATRIX: Mat4 = Mat4 {
 	x_axis: Vec4::new(1.0, 0.0, 0.0, 0.0),
@@ -20,11 +23,13 @@ pub struct Camera {
 	fovy: f32,
 	znear: f32,
 	zfar: f32,
+	// used for culling aabb
+	frustum_planes: [Plane; 4],
 }
 
 impl Camera {
 	pub fn new(position: Vec3, look_at: Vec3, aspect_ratio: f32) -> Self {
-		Self {
+		let mut out = Self {
 			position,
 			look_at,
 			up: Vec3::Y,
@@ -32,7 +37,47 @@ impl Camera {
 			fovy: 45.0,
 			znear: 0.1,
 			zfar: 1000.0,
-		}
+			frustum_planes: [Plane::default(); 4],
+		};
+
+		out.generate_frustum();
+
+		out
+	}
+
+	fn fovx(&self) -> f32 {
+		self.fovy * self.aspect_ratio
+	}
+
+	// must be called after changing camera position
+	pub fn generate_frustum(&mut self) {
+		let half_y_side = self.zfar * (self.fovy * 0.5).tan();
+		let half_x_side = half_y_side * self.aspect_ratio;
+		let forward_far = self.zfar * self.forward();
+		let sideways = self.sideways();
+		// this up is different than self.up
+		let up = sideways.cross(self.forward());
+
+		// right
+		self.frustum_planes[0] = Plane::new(
+			self.position,
+			up.cross(forward_far + half_x_side * sideways).normalize(),
+		);
+		// left
+		self.frustum_planes[1] = Plane::new(
+			self.position,
+			(forward_far - half_x_side * sideways).cross(up).normalize(),
+		);
+		// bottom
+		self.frustum_planes[2] = Plane::new(
+			self.position,
+			sideways.cross(forward_far - half_y_side * up).normalize(),
+		);
+		// top
+		self.frustum_planes[2] = Plane::new(
+			self.position,
+			(forward_far + half_y_side * up).cross(sideways).normalize(),
+		);
 	}
 
 	pub fn get_camera_matrix(&self) -> Mat4 {
@@ -55,6 +100,20 @@ impl Camera {
 
 	pub fn forward(&self) -> Vec3 {
 		self.look_at - self.position
+	}
+
+	// sideways is pointing right
+	pub fn sideways(&self) -> Vec3 {
+		self.forward().cross(self.up).normalize()
+	}
+
+	// returns true if any part of the axis aligned bounding box is vivisble in the camera
+	pub fn bounding_box_visible(&self, aabb: Aabb) -> bool {
+		// this might be cleaner with iter reduce, but i'm not sure if that would get as optimized
+		aabb.inside_of_plane(self.frustum_planes[0])
+			&& aabb.inside_of_plane(self.frustum_planes[1])
+			&& aabb.inside_of_plane(self.frustum_planes[2])
+			&& aabb.inside_of_plane(self.frustum_planes[3])
 	}
 }
 

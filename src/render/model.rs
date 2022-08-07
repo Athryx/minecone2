@@ -6,7 +6,7 @@ use wgpu::util::DeviceExt;
 //use nalgebra::{Vector3, Scale3, Matrix4, UnitQuaternion};
 use glam::{Vec3, Mat4, Quat};
 
-use super::{RenderContext, texture::Texture};
+use super::{RenderContext, texture::Texture, Aabb};
 use crate::assets::loader;
 
 pub trait Vertex: bytemuck::Pod + bytemuck::Zeroable {
@@ -43,6 +43,7 @@ pub struct Mesh {
 	index_buffer: wgpu::Buffer,
 	num_elements: u32,
 	material_index: usize,
+	pub bounding_box: Option<Aabb>,
 }
 
 impl Mesh {
@@ -51,6 +52,7 @@ impl Mesh {
 		vertices: &[T],
 		indices: &[u32],
 		material_index: usize,
+		bounding_box: Option<Aabb>,
 		context: RenderContext,
 	) -> Self {
 		let vertex_buffer = context.device.create_buffer_init(
@@ -75,7 +77,12 @@ impl Mesh {
 			index_buffer,
 			num_elements: indices.len().try_into().unwrap(),
 			material_index,
+			bounding_box,
 		}
+	}
+
+	pub fn triangle_count(&self) -> u32 {
+		self.num_elements / 3
 	}
 }
 
@@ -249,6 +256,7 @@ impl Model {
 		vertices: &[ModelVertex],
 		indices: &[u32],
 		material: Material,
+		bounding_box: Option<Aabb>,
 		context: RenderContext,
 	) -> Self {
 		let mesh = Mesh::new(
@@ -256,6 +264,7 @@ impl Model {
 			vertices,
 			indices,
 			0,
+			bounding_box,
 			context,
 		);
 

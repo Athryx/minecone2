@@ -14,6 +14,7 @@ use client::Client;
 
 mod client;
 mod ui;
+pub use ui::{debug_string, debug_display};
 mod player;
 mod parallel;
 mod world;

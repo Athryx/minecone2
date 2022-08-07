@@ -110,10 +110,10 @@ impl CameraController {
 	}
 
 	pub fn update_camera(&self, camera: &mut Camera, time_delta: Duration) {
-		let forward = camera.look_at - camera.position;
+		let forward = camera.forward();
 		let up = camera.up;
 		// sideways is pointing right
-		let right = forward.cross(up);
+		let right = camera.sideways();
 		// up from the perspective of the camera
 		let camera_up = right.cross(forward);
 
@@ -179,5 +179,7 @@ impl CameraController {
 
 		let forward = forward4.xyz();
 		camera.look_at = camera.position + forward;
+
+		camera.generate_frustum();
 	}
 }

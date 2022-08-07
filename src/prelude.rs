@@ -5,7 +5,7 @@ pub use anyhow::Result;
 use rustc_hash::FxHasher;
 use dashmap::DashMap;
 
-pub use crate::game::{CHUNK_SIZE, types::*};
+pub use crate::game::{CHUNK_SIZE, types::*, debug_string, debug_display};
 
 pub type FxDashMap<K, V> = DashMap<K, V, BuildHasherDefault<FxHasher>>;
 

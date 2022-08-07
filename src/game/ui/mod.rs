@@ -8,6 +8,7 @@ use winit::{window::Window, event::*};
 use crate::render::Renderer;
 
 mod debug_window;
+pub use debug_window::{debug_string, debug_display};
 
 pub struct MineConeUi {
     start_time: Instant,
@@ -79,7 +80,7 @@ impl MineConeUi {
         let device = renderer.device();
         let queue = renderer.queue();
 
-        let (_, view) = renderer.output_surface().expect("render pass has not been started");
+        let view = renderer.output_texture_view().expect("render pass has not been started");
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("encoder"),

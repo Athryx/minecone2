@@ -7,16 +7,16 @@ use winit::{
 	event::*,
 	dpi::PhysicalSize
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::prelude::*;
-use crate::render::Renderer;
-use crate::render::model::{Mesh, Material, ModelVertex};
+use crate::render::{Renderer, Aabb};
+use crate::render::model::{Mesh, Material};
 use camera_controller::CameraController;
 use super::player::PlayerId;
 use super::world::World;
 use super::block::{generate_texture_array, BlockFaceMesh, Air};
-use super::render_zone::UpdatedRenderZones;
+use super::render_zone::{UpdatedRenderZones, render_zone_aabb};
 use super::ui::MineConeUi;
 
 mod camera_controller;
@@ -76,7 +76,8 @@ impl Client {
 			&vertexes,
 			&indexes,
 			0,
-			self.renderer.context()
+			Some(render_zone_aabb(render_zone)),
+			self.renderer.context(),
 		));
 	}
 
@@ -84,7 +85,13 @@ impl Client {
 		let world_mesh = self.world_mesh.borrow();
 		let models = world_mesh.values().map(|mesh| (mesh, &self.block_textures)).collect::<Vec<_>>();
 
-		self.renderer.start_render_pass();
+		let mut tri_count = 0;
+		for (mesh, _) in models.iter() {
+			tri_count += mesh.triangle_count() as i64;
+		}
+		debug_display("Triangle Count", &tri_count);
+
+		self.renderer.start_render_pass();		
 
 		self.renderer.render(&models);
 		self.ui.frame_update(&self.window, &self.renderer);
@@ -141,6 +148,8 @@ impl Client {
 			self.generate_mesh(*render_zone);
 		}
 		self.updated_render_zones.clear();
+
+		debug_display("Physics Updates per Second", &((1.0 / delta.as_secs_f64()) as i64));
 
 		self.render();
 	}

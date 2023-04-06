@@ -1,4 +1,4 @@
-use std::lazy::SyncLazy;
+use std::sync::LazyLock;
 
 use array_init::array_init;
 
@@ -45,7 +45,7 @@ impl SurfaceBiome {
 	}
 }
 
-static BIOMES: SyncLazy<[SurfaceBiome; 3]> = SyncLazy::new(|| [
+static BIOMES: LazyLock<[SurfaceBiome; 3]> = LazyLock::new(|| [
 	SurfaceBiome {
 		name: "grasslands".to_owned(),
 		height_amplitude: 4.0,

@@ -1,6 +1,6 @@
 use std::path::{PathBuf, Path};
 use std::fs;
-use std::lazy::SyncLazy;
+use std::sync::LazyLock;
 use rustc_hash::FxHashMap;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use image::DynamicImage;
 use crate::render::RenderContext;
 use crate::render::model::Model;
 
-static LOADER: SyncLazy<AssetLoader> = SyncLazy::new(|| AssetLoader::from_path(PathBuf::from("res/")));
+static LOADER: LazyLock<AssetLoader> = LazyLock::new(|| AssetLoader::from_path(PathBuf::from("res/")));
 
 pub fn loader() -> &'static AssetLoader {
 	&LOADER

@@ -1,4 +1,4 @@
-use std::lazy::SyncLazy;
+use std::sync::LazyLock;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -12,7 +12,7 @@ use crate::prelude::*;
 use super::{world::World, BlockFace};
 use super::chunk::{VisitedBlockMap, CHUNK_SIZE};
 
-static TASK_QUEUE: SyncLazy<Injector<Task>> = SyncLazy::new(|| Injector::new());
+static TASK_QUEUE: LazyLock<Injector<Task>> = LazyLock::new(|| Injector::new());
 static COMPLETED_TASKS: SegQueue<Task> = SegQueue::new();
 
 // TODO: allow easy way of chaining tasks

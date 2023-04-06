@@ -1,9 +1,9 @@
-use std::{lazy::SyncLazy, collections::BTreeMap};
+use std::{sync::LazyLock, collections::BTreeMap};
 
 use egui::{Window, Context};
 use parking_lot::Mutex;
 
-static debug_info: SyncLazy<Mutex<BTreeMap<String, String>>> = SyncLazy::new(|| Mutex::new(BTreeMap::new()));
+static debug_info: LazyLock<Mutex<BTreeMap<String, String>>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 pub fn debug_string(label: &str, data: String) {
     let mut map = debug_info.lock();
